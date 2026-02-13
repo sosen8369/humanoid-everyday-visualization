@@ -17,8 +17,13 @@ from config import (
 from utils import normalize, value2color, load_tactile
 from ShapeGroup import PyramidGroup, GridGroup
 
-def draw_barh(current_norm, width, height, xlim):
+def setup_figure(width, height):
     fig, ax = plt.subplots(figsize=(width/100, height/100), dpi=100)
+    plt.tight_layout()
+    return fig, ax
+
+def draw_barh_optimized(fig, ax, current_norm, width, height, xlim):
+    ax.clear() 
     
     plot_values, plot_labels = [], []
     for s_id, row in current_norm.sort_index().iterrows():
@@ -27,18 +32,19 @@ def draw_barh(current_norm, width, height, xlim):
                 plot_values.append(val)
                 plot_labels.append(f"{s_id}_{s_idx}")
 
-    ax.barh(plot_labels, plot_values, color='skyblue')
-    ax.set_xlim(0, xlim)
-    ax.invert_yaxis()
-    ax.set_title("Normalized Tactile Profile", fontsize=10)
-    ax.tick_params(axis='y', labelsize=6)
+    if plot_values:
+        ax.barh(plot_labels, plot_values, color='skyblue')
+        ax.set_xlim(0, xlim)
+        ax.invert_yaxis()
+        ax.set_title("Normalized Tactile Profile", fontsize=10)
+        ax.tick_params(axis='y', labelsize=6)
     
     plt.tight_layout()
     fig.canvas.draw()
-    rgba_buffer = fig.canvas.buffer_rgba() #type: ignore
+    
+    rgba_buffer = fig.canvas.buffer_rgba()
     img = np.asarray(rgba_buffer)
     img = img[:, :, :3]
-    plt.close(fig)
     
     return cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
 
@@ -59,7 +65,7 @@ def draw_squares(tactile_data, mapper, base_img, vmin, vmax):
     for s_id, group in mapper.items():
         datas = tactile_data.loc[s_id]
         group_id, indexs = group
-        colors: list[tuple[int, int, int] | None] = [None]*len(indexs)
+        colors = [None]*len(indexs)
         valid = [False]*len(indexs)
 
         for v, target_pos in zip(datas, indexs):
@@ -77,7 +83,6 @@ def draw_squares(tactile_data, mapper, base_img, vmin, vmax):
 
 def visualize_tactile(base_img, tactile_data, width, height, vmin, vmax):    
     left_img = draw_squares(tactile_data, SENSOR_MAPPING['left'], base_img, vmin, vmax)
-    # ---
     cv2.putText(left_img, '8', (190,  80), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 0), 2)
     cv2.putText(left_img, '9', (220, 210), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 0), 2)
     cv2.putText(left_img, '1', (240, 410), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 0), 2)
@@ -87,11 +92,11 @@ def visualize_tactile(base_img, tactile_data, width, height, vmin, vmax):
     cv2.putText(left_img, '7', (320, 420), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 0), 2)
     cv2.putText(left_img, '4', (590, 430), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 0), 2)
     cv2.putText(left_img, '6', (480, 510), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 0), 2)
-    # ---
+    
     left_img = cv2.resize(left_img, (width, height))
     right_img = draw_squares(tactile_data, SENSOR_MAPPING['right'], base_img, vmin, vmax)
     right_img = cv2.flip(right_img, 1)
-    # ---
+    
     cv2.putText(right_img, '17', (620 - 190,  80), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 0), 2)
     cv2.putText(right_img, '18', (620 - 220, 210), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 0), 2)
     cv2.putText(right_img, '10', (620 - 240, 410), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 0), 2)
@@ -101,23 +106,18 @@ def visualize_tactile(base_img, tactile_data, width, height, vmin, vmax):
     cv2.putText(right_img, '16', (620 - 320, 420), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 0), 2)
     cv2.putText(right_img, '13', (620 - 590, 430), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 0), 2)
     cv2.putText(right_img, '15', (620 - 480, 510), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 0), 2)
-    # ---
+    
     right_img = cv2.resize(right_img, (width, height))
 
     return np.hstack([left_img, right_img])
 
-
-def render_video(folder, episode, output_path, fps = FPS):
+def render_video(folder, episode, output_path, fps=FPS):
     tactile_raw = load_tactile(folder, episode)
-    tactile_cleaned = tactile_raw.copy()
-
-    tactile_cleaned = tactile_cleaned.replace(INVALID_VALUE, np.nan)
+    tactile_cleaned = tactile_raw.replace(INVALID_VALUE, np.nan)
 
     means_all = tactile_cleaned.groupby(level='ID').mean()
     f_all = (tactile_cleaned.sub(means_all, level='ID')).abs()
-    
     high_mask = means_all >= STANDARD_VALUE
-    
     avg_dev_per_id = f_all.groupby(level='ID').mean()
     
     if high_mask.any().any():
@@ -140,25 +140,23 @@ def render_video(folder, episode, output_path, fps = FPS):
     
     base_img = cv2.imread(BACKGROUND_PATH)
     pattern = os.path.join('**', folder, '**', f'episode_{episode}', 'color', '*.jpg')
-    img_paths = glob.glob(pattern, recursive=True)
+    img_paths = sorted(glob.glob(pattern, recursive=True))
 
-    lengths = [
-        len(img_paths),
-        tactile_raw.index.get_level_values('frame').max() + 1
-    ]
+    lengths = [len(img_paths), tactile_raw.index.get_level_values('frame').max() + 1]
     
+    fig, ax = setup_figure(WIDTH, HEIGHT)
+
     for f_idx in tqdm.trange(min(lengths)):
         img_color = cv2.imread(img_paths[f_idx])
         img_color = cv2.resize(img_color, (WIDTH, HEIGHT)) if img_color is not None else np.zeros((HEIGHT, WIDTH, 3), np.uint8)
 
         frame_tactile = tactile_norm.xs(f_idx, level='frame')
-        img_graph = draw_barh(frame_tactile, WIDTH, HEIGHT, graph_xlim)
+        
+        img_graph = draw_barh_optimized(fig, ax, frame_tactile, WIDTH, HEIGHT, graph_xlim)
         
         img_top = np.hstack([img_color, img_graph])
 
         if f_idx in tactile_norm.index.get_level_values('frame'):
-            frame_tactile = tactile_norm.xs(f_idx, level='frame')
-            
             img_bottom = visualize_tactile(
                 base_img, frame_tactile, WIDTH, GRAPH_HEIGHT, 
                 vmin=norm_min, vmax=norm_max
@@ -168,12 +166,12 @@ def render_video(folder, episode, output_path, fps = FPS):
 
         out.write(np.vstack([img_top, img_bottom]))
 
+    plt.close(fig)
     out.release()
     print(f'finished at {output_path}')
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-
     parser.add_argument('-f', '--folder', type=str, required=True)
     parser.add_argument('-e', '--episode', type=int, default=0)
     parser.add_argument('-o', '--out', type=str, default='output.mp4')
@@ -182,31 +180,13 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     if args.zip:
-        folder = args.folder
-        render_video(
-            folder=folder,
-            episode=args.episode,
-            output_path=args.out
-        )
-
-        tmp = subprocess.run([
+        render_video(folder=args.folder, episode=args.episode, output_path=args.out)
+        _ = subprocess.run([
             'ffmpeg', '-y', '-i', args.out,
             '-vcodec', 'libx264', '-crf', '23',
             '-pix_fmt', 'yuv420p', args.out + 'tmp.mp4'
         ], check=True, capture_output=True, text=True)
         os.remove(args.out)
         os.rename(args.out + 'tmp.mp4', args.out)
-
     else:
-        render_video(
-            folder=args.folder,
-            episode=args.episode,
-            output_path=args.out
-        )
-
-"""
-Usage:
-python main.py \
-  --folder click_a_keyboard_key --episode 0 \
-  --out click_a_keyboard_key0.mp4 --zip
-"""
+        render_video(folder=args.folder, episode=args.episode, output_path=args.out)
