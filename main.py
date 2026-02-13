@@ -203,3 +203,10 @@ if __name__ == '__main__':
             episode=args.episode,
             output_path=args.out
         )
+
+"""
+Usage:
+python main.py \
+  --folder click_a_keyboard_key --episode 0 \
+  --out click_a_keyboard_key0.mp4 --zip
+"""
